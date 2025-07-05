@@ -76,6 +76,16 @@ safe_run() {
     fi
 }
 
+# Функция для определения текущего Display Manager
+get_active_dm() {
+    if [ -f "/etc/systemd/system/display-manager.service" ]; then
+        local active_dm=$(cat /etc/systemd/system/display-manager.service | awk -F'/' '{print $NF}')
+        echo "$active_dm"
+    else
+        echo ""
+    fi
+}
+
 # Основной процесс установки
 main() {
     # Проверка интернет-соединения
@@ -89,17 +99,17 @@ main() {
     echo -e "\n${GREEN}=== Обновление системы ===${NC}"
     safe_run "pacman -Syu --noconfirm" "important" "Обновление пакетов" || return 1
 
-    # Установка базовых компонентов (все важные)
+    # Установка базовых компонентов
     echo -e "\n${GREEN}=== Установка базовых компонентов Xorg ===${NC}"
     for pkg in xorg-server xorg-xinit xorg-xrandr xorg-xsetroot; do
         safe_install "$pkg" "important" || return 1
     done
 
-    # Основные компоненты
+    # Установка основных компонентов
     echo -e "\n${GREEN}=== Установка основных компонентов ===${NC}"
     safe_install "openbox" "important" || return 1
     
-    # Особая обработка obconf
+    # Установка obconf или альтернатив
     if is_available "obconf"; then
         safe_install "obconf" "optional"
     else
@@ -110,28 +120,57 @@ main() {
     
     safe_install "tint2" "optional"
     safe_install "lxterminal" "optional"
-    safe_install "sddm" "important" || return 1
-    safe_install "sddm-theme-sugar-candy" "optional"
 
-    # Дополнительные утилиты (все необязательные)
+    # Проверка и настройка Display Manager
+    echo -e "\n${GREEN}=== Проверка Display Manager ===${NC}"
+    CURRENT_DM=$(get_active_dm)
+    
+    if [ -n "$CURRENT_DM" ] && [ "$CURRENT_DM" != "sddm.service" ]; then
+        echo -e "${YELLOW}⚠ Обнаружен уже установленный Display Manager ($CURRENT_DM), пропускаем установку SDDM${NC}"
+    else
+        # Установка SDDM
+        safe_install "sddm" "important" || return 1
+        safe_install "sddm-theme-sugar-candy" "optional"
+        
+        # Настройка SDDM
+        safe_run "mkdir -p /usr/share/sddm/themes/sugar-candy/Backgrounds/" "optional" "Создание директории тем SDDM"
+        
+        # Копирование обоев
+        WALLPAPER_SOURCE="$(dirname "$(realpath "$0")")/kirvalpaper.png"
+        if [ -f "$WALLPAPER_SOURCE" ]; then
+            safe_run "cp '$WALLPAPER_SOURCE' /usr/share/sddm/themes/sugar-candy/Backgrounds/" "optional" "Копирование обоев для SDDM"
+            safe_run "cp '$WALLPAPER_SOURCE' /usr/share/wallpapers/kirvalpaper.png" "optional" "Копирование обоев для рабочего стола"
+        else
+            echo -e "${YELLOW}⚠ Файл обоев kirvalpaper.png не найден, будут использоваться стандартные${NC}"
+        fi
+        
+        # Настройка конфига SDDM
+        safe_run "cat > /etc/sddm.conf << 'EOL'
+[Theme]
+Current=sugar-candy
+CursorTheme=Adwaita
+Font=Sans Serif
+[Autologin]
+Session=openbox.desktop
+[General]
+EnableHiDPI=false
+EOL" "important" "Настройка конфига SDDM" || return 1
+        
+        # Включение SDDM только если он не был активен ранее
+        if [ -z "$CURRENT_DM" ]; then
+            safe_run "systemctl enable sddm.service" "important" "Включение SDDM" || return 1
+        else
+            echo -e "${YELLOW}⚠ SDDM уже настроен как Display Manager, пропускаем включение${NC}"
+        fi
+    fi
+
+    # Установка дополнительных утилит
     echo -e "\n${GREEN}=== Установка дополнительных утилит ===${NC}"
     for pkg in feh nitrogen lxappearance pcmanfm gvfs xarchiver file-roller \
                pulseaudio pavucontrol menu-cache obmenu-generator \
                network-manager-applet blueman volumeicon picom; do
         safe_install "$pkg" "optional"
     done
-
-    # Копирование обоев
-    echo -e "\n${GREEN}=== Работа с обоями ===${NC}"
-    WALLPAPER_SOURCE="$(dirname "$(realpath "$0")")/kirvalpaper.png"
-    if [ ! -f "$WALLPAPER_SOURCE" ]; then
-        echo -e "${YELLOW}⚠ Файл обоев kirvalpaper.png не найден, будут использоваться стандартные${NC}" >&2
-    else
-        WALLPAPER_DEST="/usr/share/wallpapers/kirvalpaper.png"
-        safe_run "mkdir -p /usr/share/wallpapers/" "optional" "Создание директории для обоев"
-        safe_run "cp '$WALLPAPER_SOURCE' '$WALLPAPER_DEST'" "optional" "Копирование обоев"
-        safe_run "chmod 644 '$WALLPAPER_DEST'" "optional" "Установка прав для обоев"
-    fi
 
     # Настройка для пользователей
     echo -e "\n${GREEN}=== Настройка пользовательских конфигов ===${NC}"
@@ -146,9 +185,8 @@ main() {
             fi
             
             # Конфигурация Openbox
-            safe_run "mkdir -p '$USER_HOME/.config/openbox'" "optional" "Создание .config/openbox"
+            safe_run "mkdir -p '$USER_HOME/.config/openbox'" "optional" "Создание директории Openbox"
             safe_run "cp /etc/xdg/openbox/{autostart,environment,menu.xml,rc.xml} '$USER_HOME/.config/openbox/'" "optional" "Копирование конфигов Openbox"
-            safe_run "chown -R '$USER:$USER' '$USER_HOME/.config'" "optional" "Настройка прав доступа"
             
             # Autostart
             safe_run "cat > '$USER_HOME/.config/openbox/autostart' << 'EOL'
@@ -172,10 +210,9 @@ which volumeicon >/dev/null && volumeicon &
 EOL" "optional" "Создание autostart"
             
             safe_run "chmod +x '$USER_HOME/.config/openbox/autostart'" "optional" "Установка прав autostart"
-            safe_run "chown '$USER:$USER' '$USER_HOME/.config/openbox/autostart'" "optional" "Настройка владельца autostart"
             
             # Настройка tint2
-            safe_run "mkdir -p '$USER_HOME/.config/tint2'" "optional" "Создание .config/tint2"
+            safe_run "mkdir -p '$USER_HOME/.config/tint2'" "optional" "Создание директории tint2"
             safe_run "cat > '$USER_HOME/.config/tint2/tint2rc' << 'EOL'
 [panel]
 monitor = all
@@ -209,32 +246,16 @@ color = #ffffff 100
 padding = 2 0
 EOL" "optional" "Создание tint2rc"
             
-            safe_run "chown -R '$USER:$USER' '$USER_HOME/.config/tint2'" "optional" "Настройка прав tint2"
+            # Установка прав
+            safe_run "chown -R '$USER:$USER' '$USER_HOME/.config'" "important" "Настройка прав доступа"
             
             # Генерация меню
             safe_run "sudo -u '$USER' obmenu-generator -p -i -c" "optional" "Генерация меню приложений"
         fi
     done
 
-    # Настройка SDDM
-    echo -e "\n${GREEN}=== Настройка SDDM ===${NC}"
-    safe_run "mkdir -p /usr/share/sddm/themes/sugar-candy/Backgrounds/" "optional" "Создание директории SDDM"
-    if [ -f "$WALLPAPER_SOURCE" ]; then
-        safe_run "cp '$WALLPAPER_SOURCE' /usr/share/sddm/themes/sugar-candy/Backgrounds/" "optional" "Копирование обоев для SDDM"
-    fi
-    
-    safe_run "cat > /etc/sddm.conf << 'EOL'
-[Theme]
-Current=sugar-candy
-CursorTheme=Adwaita
-Font=Sans Serif
-[Autologin]
-Session=openbox.desktop
-[General]
-EnableHiDPI=false
-EOL" "important" "Настройка конфига SDDM" || return 1
-
     # Создание сессии Dolphin
+    echo -e "\n${GREEN}=== Создание сессии Dolphin ===${NC}"
     safe_run "cat > /usr/share/xsessions/dolphin.desktop << 'EOL'
 [Desktop Entry]
 Name=Dolphin
@@ -245,6 +266,7 @@ Type=Application
 EOL" "important" "Создание сессии Dolphin" || return 1
 
     # Настройка хука для pacman
+    echo -e "\n${GREEN}=== Настройка pacman hook ===${NC}"
     safe_run "mkdir -p /etc/pacman.d/hooks" "optional" "Создание директории hooks"
     safe_run "cat > /etc/pacman.d/hooks/obmenu-generator.hook << 'EOL'
 [Trigger]
@@ -257,9 +279,6 @@ Description = Updating Openbox menu...
 When = PostTransaction
 Exec = /usr/bin/obmenu-generator -p -i -c
 EOL" "optional" "Создание pacman hook"
-
-    # Включение SDDM
-    safe_run "systemctl enable sddm.service" "important" "Включение SDDM" || return 1
 
     echo -e "\n${GREEN}=== УСТАНОВКА ЗАВЕРШЕНА ===${NC}"
     echo -e "Рекомендуется перезагрузить систему:"
