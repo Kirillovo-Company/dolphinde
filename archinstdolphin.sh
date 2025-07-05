@@ -2,62 +2,78 @@
 
 # Проверка на выполнение от root
 if [ "$(id -u)" -ne 0 ]; then
-    echo "Этот скрипт должен быть запущен с правами root. Используйте sudo."
+    echo "ОШИБКА: Этот скрипт должен быть запущен с правами root. Используйте sudo."
     exit 1
 fi
 
 # Функция для обработки ошибок
 handle_error() {
-    echo "Ошибка в строке $1. Код выхода: $2"
-    echo "Дополнительная информация:"
-    echo "$3"
+    echo "ОШИБКА в строке $1. Команда: $2. Код выхода: $3" >&2
     exit 1
 }
 
-trap 'handle_error $LINENO $? "$BASH_COMMAND"' ERR
+trap 'handle_error $LINENO "$BASH_COMMAND" $?' ERR
+
+# Проверка интернет-соединения
+echo "Проверка интернет-соединения..."
+if ! ping -c 1 archlinux.org &> /dev/null; then
+    echo "ОШИБКА: Нет интернет-соединения!" >&2
+    exit 1
+fi
 
 # Установка базовых компонентов
-echo "Установка базовых компонентов..."
-pacman -Syu --noconfirm || { echo "Ошибка при обновлении системы"; exit 1; }
-pacman -S --noconfirm --needed xorg-server xorg-xinit xorg-xrandr xorg-xsetroot || { echo "Ошибка при установке Xorg"; exit 1; }
+echo "Обновление системы и установка базовых компонентов..."
+pacman -Syu --noconfirm || { echo "ОШИБКА: Не удалось обновить систему" >&2; exit 1; }
+pacman -S --noconfirm --needed xorg-server xorg-xinit xorg-xrandr xorg-xsetroot || { echo "ОШИБКА: Не удалось установить Xorg" >&2; exit 1; }
 
 # Установка основных компонентов
 echo "Установка Openbox и зависимостей..."
-pacman -S --noconfirm --needed openbox obconf tint2 lxterminal sddm || { echo "Ошибка при установке основных компонентов"; exit 1; }
+pacman -S --noconfirm --needed openbox obconf tint2 lxterminal sddm sddm-theme-sugar-candy || { echo "ОШИБКА: Не удалось установить основные компоненты" >&2; exit 1; }
 
 # Установка дополнительных утилит
 echo "Установка дополнительных утилит..."
 pacman -S --noconfirm --needed feh nitrogen lxappearance pcmanfm gvfs xarchiver file-roller \
     pulseaudio pavucontrol menu-cache obmenu-generator \
-    network-manager-applet blueman volumeicon picom || { echo "Ошибка при установке дополнительных утилит"; exit 1; }
+    network-manager-applet blueman volumeicon picom || { echo "ОШИБКА: Не удалось установить дополнительные утилиты" >&2; exit 1; }
 
-# Проверка существования файла обоев
+# Проверка и копирование обоев
+echo "Проверка файла обоев..."
 WALLPAPER_SOURCE="$(dirname "$(realpath "$0")")/kirvalpaper.png"
 if [ ! -f "$WALLPAPER_SOURCE" ]; then
-    echo "Файл обоев kirvalpaper.png не найден в директории скрипта!"
+    echo "ОШИБКА: Файл обоев kirvalpaper.png не найден в директории скрипта!" >&2
     exit 1
 fi
 
-# Копирование обоев
-echo "Копирование обоев..."
 WALLPAPER_DEST="/usr/share/wallpapers/kirvalpaper.png"
-mkdir -p /usr/share/wallpapers/ || { echo "Ошибка при создании директории для обоев"; exit 1; }
-cp "$WALLPAPER_SOURCE" "$WALLPAPER_DEST" || { echo "Ошибка при копировании обоев"; exit 1; }
-chmod 644 "$WALLPAPER_DEST" || { echo "Ошибка при изменении прав доступа к обоям"; exit 1; }
+echo "Копирование обоев..."
+mkdir -p /usr/share/wallpapers/ || { echo "ОШИБКА: Не удалось создать директорию для обоев" >&2; exit 1; }
+if ! cp "$WALLPAPER_SOURCE" "$WALLPAPER_DEST"; then
+    echo "ОШИБКА: Не удалось скопировать обои" >&2
+    exit 1
+fi
+chmod 644 "$WALLPAPER_DEST" || { echo "ОШИБКА: Не удалось изменить права доступа к обоям" >&2; exit 1; }
 
-# Настройка для каждого пользователя
+# Настройка для пользователей
+echo "Настройка для пользователей..."
 for USER_HOME in /home/*; do
-    USER=$(basename "$USER_HOME")
-    
     if [ -d "$USER_HOME" ]; then
+        USER=$(basename "$USER_HOME")
         echo "Настройка для пользователя $USER..."
         
+        # Проверка существования пользователя
+        if ! id -u "$USER" &> /dev/null; then
+            echo "ПРЕДУПРЕЖДЕНИЕ: Пользователь $USER не существует, пропускаем..."
+            continue
+        fi
+        
         # Создание конфигурационных файлов Openbox
-        mkdir -p "$USER_HOME/.config/openbox" || { echo "Ошибка при создании директории Openbox"; exit 1; }
-        cp /etc/xdg/openbox/{autostart,environment,menu.xml,rc.xml} "$USER_HOME/.config/openbox/" || { echo "Ошибка при копировании конфигов Openbox"; exit 1; }
-        chown -R "$USER:$USER" "$USER_HOME/.config" || { echo "Ошибка при изменении владельца конфигов"; exit 1; }
+        echo "Создание конфигов Openbox..."
+        mkdir -p "$USER_HOME/.config/openbox" || { echo "ОШИБКА: Не удалось создать директорию Openbox" >&2; exit 1; }
+        cp /etc/xdg/openbox/{autostart,environment,menu.xml,rc.xml} "$USER_HOME/.config/openbox/" || { echo "ОШИБКА: Не удалось скопировать конфиги Openbox" >&2; exit 1; }
+        chown -R "$USER:$USER" "$USER_HOME/.config" || { echo "ОШИБКА: Не удалось изменить владельца конфигов" >&2; exit 1; }
         
         # Настройка autostart
+        echo "Настройка автозапуска..."
         cat > "$USER_HOME/.config/openbox/autostart" << 'EOL'
 #!/bin/sh
 
@@ -76,7 +92,7 @@ xset s off &
 xset -dpms &
 
 # Запуск композитора
-picom &
+picom --config ~/.config/picom.conf &
 
 # Системные треи
 nm-applet &
@@ -84,71 +100,68 @@ blueman-applet &
 volumeicon &
 EOL
 
-        chmod +x "$USER_HOME/.config/openbox/autostart" || { echo "Ошибка при изменении прав autostart"; exit 1; }
-        chown "$USER:$USER" "$USER_HOME/.config/openbox/autostart" || { echo "Ошибка при изменении владельца autostart"; exit 1; }
+        chmod +x "$USER_HOME/.config/openbox/autostart" || { echo "ОШИБКА: Не удалось изменить права autostart" >&2; exit 1; }
+        chown "$USER:$USER" "$USER_HOME/.config/openbox/autostart" || { echo "ОШИБКА: Не удалось изменить владельца autostart" >&2; exit 1; }
 
         # Настройка tint2
-        mkdir -p "$USER_HOME/.config/tint2" || { echo "Ошибка при создании директории tint2"; exit 1; }
+        echo "Настройка tint2..."
+        mkdir -p "$USER_HOME/.config/tint2" || { echo "ОШИБКА: Не удалось создать директорию tint2" >&2; exit 1; }
         cat > "$USER_HOME/.config/tint2/tint2rc" << 'EOL'
-# Панель
-panel_monitor = all
-panel_position = bottom center
-panel_items = TSC
-panel_size = 100% 30
-panel_margin = 0 0
-panel_padding = 2 0 2
-panel_dock = 0
+[panel]
+monitor = all
+position = bottom center
+size = 100% 30
+margin = 0 0
+padding = 2 0 2
+dock = 0
 wm_menu = 1
 
-# Фон
-panel_background_id = 1
+[background]
+color = #333333 60
 rounded = 0
 border_width = 0
-background_color = #333333 60
 
-# Таксбар
-taskbar_mode = multi_desktop
-taskbar_padding = 6 2 6
-taskbar_background_id = 0
-taskbar_active_background_id = 0
-taskbar_name = 1
-taskbar_name_background_id = 0
-taskbar_name_active_background_id = 0
-taskbar_name_font = Sans 10
-taskbar_name_font_color = #ffffff 100
-taskbar_name_active_font_color = #ffffff 100
+[taskbar]
+mode = multi_desktop
+padding = 6 2 6
+show_all = true
 
-# Системная зона
-system_tray_padding = 0 4 2
-system_tray_sort = ascending
+[task]
+max_width = 150
+show_icon = true
+show_text = true
 
-# Часы
+[system]
+systray_padding = 0 4 2
+sort = ascending
+
+[clock]
 time1_format = %H:%M
 time1_font = Sans 10
 time2_format = %A %d %B
 time2_font = Sans 8
-clock_font_color = #ffffff 100
-clock_padding = 2 0
-clock_background_id = 0
+color = #ffffff 100
+padding = 2 0
 EOL
 
-        chown -R "$USER:$USER" "$USER_HOME/.config/tint2" || { echo "Ошибка при изменении владельца tint2"; exit 1; }
+        chown -R "$USER:$USER" "$USER_HOME/.config/tint2" || { echo "ОШИБКА: Не удалось изменить владельца tint2" >&2; exit 1; }
 
         # Генерация меню
-        sudo -u "$USER" obmenu-generator -p -i -c || { echo "Ошибка при генерации меню"; exit 1; }
+        echo "Генерация меню..."
+        sudo -u "$USER" obmenu-generator -p -i -c || { echo "ОШИБКА: Не удалось сгенерировать меню" >&2; exit 1; }
     fi
 done
 
 # Настройка SDDM
 echo "Настройка SDDM..."
+mkdir -p /usr/share/sddm/themes/sugar-candy/Backgrounds/ || { echo "ОШИБКА: Не удалось создать директорию для SDDM" >&2; exit 1; }
+cp "$WALLPAPER_SOURCE" /usr/share/sddm/themes/sugar-candy/Backgrounds/ || { echo "ОШИБКА: Не удалось скопировать обои для SDDM" >&2; exit 1; }
 
-# Установка темы SDDM (опционально)
-pacman -S --noconfirm --needed sddm-theme-sugar-candy || { echo "Ошибка при установке темы SDDM"; exit 1; }
-
-# Настройка конфигурации SDDM
 cat > /etc/sddm.conf << 'EOL'
 [Theme]
 Current=sugar-candy
+CursorTheme=Adwaita
+Font=Sans Serif
 
 [Autologin]
 Session=openbox.desktop
@@ -157,11 +170,7 @@ Session=openbox.desktop
 EnableHiDPI=false
 EOL
 
-# Настройка обоев для SDDM
-mkdir -p /usr/share/sddm/themes/sugar-candy/Backgrounds/ || { echo "Ошибка при создании директории SDDM"; exit 1; }
-cp "$WALLPAPER_SOURCE" /usr/share/sddm/themes/sugar-candy/Backgrounds/ || { echo "Ошибка при копировании обоев SDDM"; exit 1; }
-
-# Создание .desktop файла для сессии Dolphin
+# Создание сессии Dolphin
 echo "Создание сессии Dolphin..."
 cat > /usr/share/xsessions/dolphin.desktop << 'EOL'
 [Desktop Entry]
@@ -172,9 +181,9 @@ TryExec=/usr/bin/openbox-session
 Type=Application
 EOL
 
-# Создание хука для обновления меню
-echo "Создание pacman hook для обновления меню..."
-mkdir -p /etc/pacman.d/hooks || { echo "Ошибка при создании директории hooks"; exit 1; }
+# Настройка хука для pacman
+echo "Настройка pacman hook..."
+mkdir -p /etc/pacman.d/hooks || { echo "ОШИБКА: Не удалось создать директорию hooks" >&2; exit 1; }
 cat > /etc/pacman.d/hooks/obmenu-generator.hook << 'EOL'
 [Trigger]
 Operation = Install
@@ -190,8 +199,9 @@ EOL
 
 # Включение SDDM
 echo "Включение SDDM..."
-systemctl enable sddm.service || { echo "Ошибка при включении SDDM"; exit 1; }
+systemctl enable sddm.service || { echo "ОШИБКА: Не удалось включить SDDM" >&2; exit 1; }
 
-echo "Установка успешно завершена!"
+echo ""
+echo "УСТАНОВКА УСПЕШНО ЗАВЕРШЕНА!"
 echo "Рекомендуется перезагрузить систему:"
 echo "sudo reboot"
