@@ -118,7 +118,8 @@ main() {
         safe_install "obmenu-generator" "optional"
     fi
     
-    safe_install "tint2" "optional"
+    # Установка lxpanel вместо tint2
+    safe_install "lxpanel" "optional"
     safe_install "lxterminal" "optional"
 
     # Проверка и настройка Display Manager
@@ -188,13 +189,13 @@ EOL" "important" "Настройка конфига SDDM" || return 1
             safe_run "mkdir -p '$USER_HOME/.config/openbox'" "optional" "Создание директории Openbox"
             safe_run "cp /etc/xdg/openbox/{autostart,environment,menu.xml,rc.xml} '$USER_HOME/.config/openbox/'" "optional" "Копирование конфигов Openbox"
             
-            # Autostart
+            # Autostart с lxpanel
             safe_run "cat > '$USER_HOME/.config/openbox/autostart' << 'EOL'
 #!/bin/sh
 # Установка обоев
 [ -f '/usr/share/wallpapers/kirvalpaper.png' ] && feh --bg-scale /usr/share/wallpapers/kirvalpaper.png &
 # Панель
-which tint2 >/dev/null && tint2 &
+which lxpanel >/dev/null && lxpanel &
 # Раскладка клавиатуры
 which setxkbmap >/dev/null && setxkbmap us,ru -option grp:alt_shift_toggle &
 # Дополнительные настройки
@@ -211,40 +212,75 @@ EOL" "optional" "Создание autostart"
             
             safe_run "chmod +x '$USER_HOME/.config/openbox/autostart'" "optional" "Установка прав autostart"
             
-            # Настройка tint2
-            safe_run "mkdir -p '$USER_HOME/.config/tint2'" "optional" "Создание директории tint2"
-            safe_run "cat > '$USER_HOME/.config/tint2/tint2rc' << 'EOL'
-[panel]
-monitor = all
-position = bottom center
-size = 100% 30
-margin = 0 0
-padding = 2 0 2
-dock = 0
-wm_menu = 1
-[background]
-color = #333333 60
-rounded = 0
-border_width = 0
-[taskbar]
-mode = multi_desktop
-padding = 6 2 6
-show_all = true
-[task]
-max_width = 150
-show_icon = true
-show_text = true
-[system]
-systray_padding = 0 4 2
-sort = ascending
-[clock]
-time1_format = %H:%M
-time1_font = Sans 10
-time2_format = %A %d %B
-time2_font = Sans 8
-color = #ffffff 100
-padding = 2 0
-EOL" "optional" "Создание tint2rc"
+            # Настройка lxpanel
+            safe_run "mkdir -p '$USER_HOME/.config/lxpanel'" "optional" "Создание директории lxpanel"
+            safe_run "cat > '$USER_HOME/.config/lxpanel/default/panels/panel' << 'EOL'
+Global {
+    edge=bottom
+    allign=left
+    margin=0
+    widthtype=percent
+    width=100
+    height=24
+    transparent=0
+    tintcolor=#000000
+    alpha=255
+    autohide=0
+    heightwhenhidden=2
+    setdocktype=1
+    setpartialstrut=1
+    usefontcolor=1
+    fontsize=10
+    fontcolor=#ffffff
+    usefontsize=1
+    background=0
+    backgroundfile=
+    iconsize=24
+}
+Plugin {
+    type=menu
+    Config {
+        image=/usr/share/pixmaps/lxde-icon.png
+        system {
+        }
+        separator {
+        }
+        item {
+            command=run
+        }
+        item {
+            command=logout
+        }
+    }
+}
+Plugin {
+    type=launchbar
+    Config {
+        Button {
+            id=pcmanfm.desktop
+        }
+        Button {
+            id=lxterminal.desktop
+        }
+    }
+}
+Plugin {
+    type=tasklist
+}
+Plugin {
+    type=sysbuttons
+}
+Plugin {
+    type=pager
+}
+Plugin {
+    type=clock
+    Config {
+        ClockFmt=%H:%M
+        TooltipFmt=%A %d %B %Y
+    }
+}
+EOL" "optional" "Создание конфига lxpanel"
             
             # Установка прав
             safe_run "chown -R '$USER:$USER' '$USER_HOME/.config'" "important" "Настройка прав доступа"
