@@ -28,7 +28,7 @@ pacman -S --noconfirm --needed xorg-server xorg-xinit xorg-xrandr xorg-xsetroot 
 
 # Установка основных компонентов
 echo "Установка Openbox и зависимостей..."
-pacman -S --noconfirm --needed openbox obconf tint2 lxterminal sddm sddm-theme-sugar-candy || { echo "ОШИБКА: Не удалось установить основные компоненты" >&2; exit 1; }
+pacman -S --noconfirm --needed openbox obconf tint2 lxterminal || { echo "ОШИБКА: Не удалось установить основные компоненты" >&2; exit 1; }
 
 # Установка дополнительных утилит
 echo "Установка дополнительных утилит..."
